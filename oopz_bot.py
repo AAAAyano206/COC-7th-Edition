@@ -2,17 +2,10 @@
 """
 COC 跑团助手 - Oopz Bot 连接脚本
 
-使用方法：
+使用方法:
     1. 设置环境变量
     2. pip install oopz-sdk requests
     3. python oopz_bot.py
-
-环境变量：
-    OOPZ_DEVICE_ID      - 设备ID
-    OOPZ_PERSON_UID     - 用户ID
-    OOPZ_JWT_TOKEN      - JWT令牌
-    OOPZ_PRIVATE_KEY    - 私钥
-    API_BASE_URL        - 后端API地址
 """
 
 import os
@@ -35,35 +28,22 @@ def call_api(procedure: str, payload: dict) -> dict:
     """调用后端 tRPC API"""
     url = f"{API_BASE_URL}/{procedure}"
     try:
-        # tRPC 使用 { "0": { "json": payload } } 格式
         trpc_payload = {"0": {"json": payload}}
-        response = requests.post(
-            url,
-            headers={"Content-Type": "application/json"},
-            json=trpc_payload,
-            timeout=10,
-        )
+        response = requests.post(url, headers={"Content-Type": "application/json"},
+                                 json=trpc_payload, timeout=10)
         if response.status_code == 200:
             result = response.json()
             if "result" in result and "data" in result["result"]:
                 return result["result"]["data"]
             return result
-        else:
-            print(f"[API 错误] HTTP {response.status_code}")
-            return {"handled": False}
-    except requests.exceptions.ConnectionError:
-        print(f"[API 错误] 无法连接: {API_BASE_URL}")
         return {"handled": False}
-    except Exception as e:
-        print(f"[API 错误] {e}")
+    except Exception:
         return {"handled": False}
 
 
 async def handle_message(message, ctx):
     """处理频道消息"""
     text = message.text.strip() if message.text else ""
-
-    # 只处理 . 开头的指令
     if not text.startswith("."):
         return
 
@@ -73,16 +53,12 @@ async def handle_message(message, ctx):
 
     print(f"[指令] {author_name}: {text[:40]}")
 
-    # 构建 tRPC 请求（mutation 格式）
     payload = {
         "event": "message.created",
         "data": {
             "id": str(message.message_id) if message.message_id else "",
             "channel_id": channel_id,
-            "author": {
-                "id": author_id,
-                "username": author_name,
-            },
+            "author": {"id": author_id, "username": author_name},
             "content": text,
             "timestamp": str(message.created_at) if message.created_at else "",
         },
@@ -97,21 +73,52 @@ async def handle_message(message, ctx):
             print(f"[发送失败] {e}")
 
 
+def read_private_key() -> str:
+    """读取 PRIVATE_KEY，支持多行格式"""
+    key = os.environ.get("OOPZ_PRIVATE_KEY", "")
+    if not key:
+        return ""
+    # 处理 \n 转义字符
+    key = key.replace("\\n", "\n")
+    # 确保有正确的头部和尾部
+    key = key.strip()
+    if not key.startswith("-----"):
+        # 可能 PEM 格式被破坏了，尝试修复
+        pass
+    return key
+
+
 async def main():
-    """主入口"""
     print("=" * 50)
     print("  COC 跑团助手 - Oopz Bot")
     print("=" * 50)
 
-    # 检查凭证
-    required = ["OOPZ_DEVICE_ID", "OOPZ_PERSON_UID", "OOPZ_JWT_TOKEN", "OOPZ_PRIVATE_KEY"]
-    missing = [e for e in required if not os.environ.get(e)]
+    # 读取凭证 - 直接从环境变量获取
+    device_id = os.environ.get("OOPZ_DEVICE_ID", "")
+    person_uid = os.environ.get("OOPZ_PERSON_UID", "")
+    jwt_token = os.environ.get("OOPZ_JWT_TOKEN", "")
+    private_key = read_private_key()
+
+    # 检查凭证完整性
+    missing = []
+    if not device_id:
+        missing.append("OOPZ_DEVICE_ID")
+    if not person_uid:
+        missing.append("OOPZ_PERSON_UID")
+    if not jwt_token:
+        missing.append("OOPZ_JWT_TOKEN")
+    if not private_key:
+        missing.append("OOPZ_PRIVATE_KEY")
+
     if missing:
-        print("\n[错误] 缺少环境变量:")
-        for e in missing:
-            print(f"  - {e}")
-        print("\n获取方法:")
-        print("  python -m oopz_sdk.cli.password_login --phone 手机号 --print-env powershell")
+        print(f"\n[错误] 缺少环境变量: {', '.join(missing)}")
+        print("\n当前环境变量值:")
+        for key in ["OOPZ_DEVICE_ID", "OOPZ_PERSON_UID", "OOPZ_JWT_TOKEN", "OOPZ_PRIVATE_KEY"]:
+            val = os.environ.get(key, "(未设置)")
+            if val and len(val) > 20:
+                val = val[:20] + "..."
+            print(f"  {key}={val}")
+        print("\n请确保已执行 export 命令设置凭证")
         sys.exit(1)
 
     # 测试后端连接
@@ -122,12 +129,17 @@ async def main():
     else:
         print("[警告] 后端未响应，Bot 仍会继续")
 
-    # 使用 from_env_async 避免 event loop 冲突
+    # 创建 OopzConfig 对象 - 直接传入凭证
     print("\n[连接] Oopz...")
     try:
-        config = await OopzConfig.from_env_async()
+        config = OopzConfig(
+            device_id=device_id,
+            person_uid=person_uid,
+            jwt_token=jwt_token,
+            private_key=private_key,
+        )
     except Exception as e:
-        print(f"[错误] 配置加载失败: {e}")
+        print(f"[错误] 创建配置失败: {e}")
         sys.exit(1)
 
     bot = OopzBot(config)
@@ -154,5 +166,4 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n[致命错误] {e}")
         import traceback
-
         traceback.print_exc()

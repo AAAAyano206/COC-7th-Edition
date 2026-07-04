@@ -39,3 +39,6 @@ build/
 # Test coverage
 coverage/
 .nyc_output/
+
+# 本地的记录md文件
+COC跑团助手项目总结.md
